@@ -1,43 +1,57 @@
 import os
+import time
 import random
 import tweepy
 from openai import OpenAI
 
-# ===== OpenAI（文章生成AI）=====
-openai_client = OpenAI(
-    api_key=os.environ["OPENAI_API_KEY"]
-)
+# ===== API設定 =====
+client_ai = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
 
-# ===== X（投稿用）=====
-client = tweepy.Client(
+client_x = tweepy.Client(
     consumer_key=os.environ["X_API_KEY"],
     consumer_secret=os.environ["X_API_SECRET"],
     access_token=os.environ["X_ACCESS_TOKEN"],
-    access_token_secret=os.environ["X_ACCESS_TOKEN_SECRET"],
+    access_token_secret=os.environ["X_ACCESS_TOKEN_SECRET"]
 )
 
-# ===== ネタ被り防止用テーマ =====
-topics = [
-    "宇宙", "人間の体", "歴史", "動物",
-    "心理学", "科学", "食べ物", "言語"
-]
+# ===== ネタ被り防止 =====
+USED_FILE = "used_topics.txt"
 
-topic = random.choice(topics)
+def load_used():
+    if not os.path.exists(USED_FILE):
+        return set()
+    with open(USED_FILE, "r", encoding="utf-8") as f:
+        return set(f.read().splitlines())
 
-prompt = f"""
-Xに投稿する短い雑学を1文で作ってください。
-テーマは「{topic}」。
-80文字以内、日本語、わかりやすく。
+def save_used(topic):
+    with open(USED_FILE, "a", encoding="utf-8") as f:
+        f.write(topic + "\n")
+
+# ===== 雑学生成 =====
+def generate_trivia(used):
+    prompt = f"""
+短くてわかりやすい雑学を1つ作ってください。
+・60文字以内
+・日本語
+・すでに使ったネタは避ける
+使用済みネタ一覧：{list(used)}
 """
+    res = client_ai.responses.create(
+        model="gpt-4.1-mini",
+        input=prompt
+    )
+    return res.output_text.strip()
 
-response = openai_client.chat.completions.create(
-    model="gpt-4o-mini",
-    messages=[
-        {"role": "user", "content": prompt}
-    ]
-)
+# ===== 投稿処理 =====
+def post_once():
+    used = load_used()
+    text = generate_trivia(used)
+    client_x.create_tweet(text=text)
+    save_used(text)
+    print("投稿成功:", text)
 
-text = response.choices[0].message.content.strip()
-
-# 投稿
-client.create_tweet(text=text)
+# ===== 1日3回投稿 =====
+for i in range(3):
+    post_once()
+    if i < 2:
+        time.sleep(2 * 60 * 60)  # 2時間待つ
